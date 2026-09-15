@@ -26,27 +26,13 @@ public class FullAuto : SonsMod
     public FullAuto()
     {
         HarmonyPatchAll = true;
-        OnUpdateCallback = OnUpdate;
     }
 
     protected override void OnSdkInitialized()
     {
         _configPath = Path.Combine(LoaderEnvironment.UserDataDirectory, "FullAuto.txt");
         Load();
-        RLog.Msg($"FullAuto loaded. Enabled: {Enabled}, RPM: {Rpm}. F10 toggles, console: fullauto");
-    }
-
-    private void OnUpdate()
-    {
-        if (!GameState.IsPlayerControllable)
-            return;
-
-        if (Input.GetKeyDown(KeyCode.F10))
-        {
-            Enabled = !Enabled;
-            Save();
-            Announce();
-        }
+        RLog.Msg($"FullAuto loaded. Enabled: {Enabled}, RPM: {Rpm}. Guns only. Console: fullauto");
     }
 
     [DebugCommand("fullauto")]
@@ -153,13 +139,12 @@ internal static class CheckFireInputPatch
 {
     private const int MaxShotsPerFrame = 4;
 
-    private static readonly HashSet<string> Excluded = new()
+    private static readonly HashSet<string> Guns = new()
     {
-        "GrenadeWeaponController",
-        "MolotovWeaponController",
-        "TimeBombWeaponController",
-        "SmallRockWeaponController",
-        "RopeGunController"
+        "CompactPistolWeaponController",
+        "RevolverWeaponController",
+        "ShotgunWeaponController",
+        "RifleAnimatorController"
     };
 
     private static readonly Dictionary<IntPtr, bool> Allowed = new();
@@ -245,11 +230,10 @@ internal static class CheckFireInputPatch
         if (Allowed.TryGetValue(ptr, out var allowed))
             return allowed;
 
-        allowed = !Excluded.Contains(controller.GetIl2CppType().Name);
+        var name = controller.GetIl2CppType().Name;
+        allowed = Guns.Contains(name);
         Allowed[ptr] = allowed;
+        RLog.Msg($"FullAuto {name}: {(allowed ? "full-auto" : "ignored")}");
         return allowed;
     }
 }
-
-
-
