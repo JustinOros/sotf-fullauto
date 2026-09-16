@@ -89,3 +89,4 @@ the game is not found automatically.
 ## Troubleshooting
 
 Check `_RedLoader\Latest.log` in your game folder. FullAuto logs a line when it
+
