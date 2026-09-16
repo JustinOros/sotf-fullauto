@@ -61,7 +61,7 @@ public class FullAuto : SonsMod
                 _ => FireMode.Auto
             };
             CheckFireInputPatch.CancelBurst();
-            SonsTools.ShowMessage(ModeName(), 2f);
+            ShowMode();
             RLog.Msg($"FullAuto mode: {ModeName()}");
         }
     }
@@ -126,6 +126,11 @@ public class FullAuto : SonsMod
             FireMode.Burst => "3-Round Burst",
             _ => "Semi-automatic"
         };
+    }
+
+    internal static void ShowMode()
+    {
+        SonsTools.ShowMessage(ModeName(), 2f);
     }
 
     internal static void Announce()
@@ -195,6 +200,7 @@ internal static class CheckFireInputPatch
     private static float _nextShot;
     private static int _burstLeft;
     private static float _lastGunTime = -1f;
+    private static IntPtr _lastGunPtr = IntPtr.Zero;
     private static bool _triggerDown;
     private static float _releasedFor;
     private static bool _actionFailed;
@@ -330,6 +336,13 @@ internal static class CheckFireInputPatch
             return true;
 
         var allowed = IsAllowed(__instance);
+        var ptr = __instance.Pointer;
+
+        if (allowed && FullAuto.Enabled && (!HoldingGun || ptr != _lastGunPtr))
+            FullAuto.ShowMode();
+
+        if (allowed)
+            _lastGunPtr = ptr;
         _lastGunTime = allowed ? Time.time : -1f;
 
         if (!FullAuto.Enabled || !allowed)
