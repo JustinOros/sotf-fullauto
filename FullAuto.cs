@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using HarmonyLib;
@@ -11,6 +12,13 @@ using UnityEngine;
 
 namespace FullAuto;
 
+public enum FireMode
+{
+    Auto,
+    Burst,
+    Semi
+}
+
 public class FullAuto : SonsMod
 {
     internal const float MinRpm = 60f;
@@ -18,6 +26,7 @@ public class FullAuto : SonsMod
 
     internal static bool Enabled = true;
     internal static float Rpm = 900f;
+    internal static FireMode Mode = FireMode.Auto;
     internal static bool Verbose;
 
     private static string _configPath;
@@ -25,13 +34,36 @@ public class FullAuto : SonsMod
     public FullAuto()
     {
         HarmonyPatchAll = true;
+        OnUpdateCallback = OnUpdate;
     }
 
     protected override void OnSdkInitialized()
     {
         _configPath = Path.Combine(LoaderEnvironment.UserDataDirectory, "FullAuto.txt");
         Load();
-        RLog.Msg($"FullAuto loaded. Enabled: {Enabled}, RPM: {Rpm}. Guns only. Console: fullauto");
+        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Guns only. Middle mouse cycles modes. Console: fullauto");
+    }
+
+    private void OnUpdate()
+    {
+        if (!Enabled || !GameState.IsPlayerControllable || !CheckFireInputPatch.HoldingGun)
+            return;
+
+        if (Mode == FireMode.Burst && Input.GetMouseButtonDown(0))
+            CheckFireInputPatch.StartBurst();
+
+        if (Input.GetMouseButtonDown(2))
+        {
+            Mode = Mode switch
+            {
+                FireMode.Auto => FireMode.Burst,
+                FireMode.Burst => FireMode.Semi,
+                _ => FireMode.Auto
+            };
+            CheckFireInputPatch.CancelBurst();
+            SonsTools.ShowMessage(ModeName(), 2f);
+            RLog.Msg($"FullAuto mode: {ModeName()}");
+        }
     }
 
     [DebugCommand("fullauto")]
@@ -65,6 +97,7 @@ public class FullAuto : SonsMod
                 if (parts.Length > 1 && float.TryParse(parts[1], out var value))
                 {
                     Rpm = Mathf.Clamp(value, MinRpm, MaxRpm);
+                    Save();
                     break;
                 }
                 Usage();
@@ -74,7 +107,7 @@ public class FullAuto : SonsMod
                 return;
         }
 
-        Save();
+        CheckFireInputPatch.CancelBurst();
         Announce();
     }
 
@@ -85,9 +118,19 @@ public class FullAuto : SonsMod
         RLog.Msg(text);
     }
 
+    private static string ModeName()
+    {
+        return Mode switch
+        {
+            FireMode.Auto => "Full-Auto",
+            FireMode.Burst => "3-Round Burst",
+            _ => "Semi-Automatic"
+        };
+    }
+
     internal static void Announce()
     {
-        var text = $"FullAuto {(Enabled ? "ON" : "OFF")} ({Rpm} RPM)";
+        var text = Enabled ? $"{ModeName()} ({Rpm} RPM)" : "FullAuto OFF";
         SonsTools.ShowMessage(text);
         RLog.Msg(text);
     }
@@ -108,9 +151,7 @@ public class FullAuto : SonsMod
                 var key = kv[0].Trim().ToLowerInvariant();
                 var val = kv[1].Trim();
 
-                if (key == "enabled" && bool.TryParse(val, out var enabled))
-                    Enabled = enabled;
-                else if (key == "rpm" && float.TryParse(val, out var rpm))
+                if (key == "rpm" && float.TryParse(val, out var rpm))
                     Rpm = Mathf.Clamp(rpm, MinRpm, MaxRpm);
             }
         }
@@ -124,7 +165,7 @@ public class FullAuto : SonsMod
     {
         try
         {
-            File.WriteAllText(_configPath, $"enabled={Enabled}\nrpm={Rpm}\n");
+            File.WriteAllText(_configPath, $"rpm={Rpm}\n");
         }
         catch (Exception e)
         {
@@ -137,6 +178,7 @@ public class FullAuto : SonsMod
 internal static class CheckFireInputPatch
 {
     private const int MaxShotsPerFrame = 4;
+    private const int BurstSize = 3;
 
     private static readonly HashSet<string> Guns = new()
     {
@@ -149,7 +191,28 @@ internal static class CheckFireInputPatch
     private static readonly Dictionary<IntPtr, bool> Allowed = new();
     private static readonly HashSet<string> Reported = new();
     private static float _nextShot;
+    private static int _burstLeft;
+    private static float _lastGunTime = -1f;
     private static bool _loggedHook;
+
+    internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
+
+    internal static void CancelBurst()
+    {
+        _burstLeft = 0;
+    }
+
+    internal static void StartBurst()
+    {
+        if (_burstLeft > 0)
+            return;
+
+        _burstLeft = BurstSize;
+        _nextShot = 0f;
+
+        if (FullAuto.Verbose)
+            RLog.Msg("FullAuto burst start");
+    }
 
     private static bool Prefix(RangedWeaponController __instance)
     {
@@ -159,25 +222,49 @@ internal static class CheckFireInputPatch
             RLog.Msg("FullAuto: CheckFireInput hook is firing");
         }
 
-        if (!FullAuto.Enabled || !__instance.IsLocalPlayer() || !IsAllowed(__instance))
+        if (!__instance.IsLocalPlayer())
             return true;
 
-        if (!Input.GetMouseButton(0) || !GameState.IsPlayerControllable)
+        var allowed = IsAllowed(__instance);
+        _lastGunTime = allowed ? Time.time : -1f;
+
+        if (!FullAuto.Enabled || !allowed)
             return true;
+
+        if (FullAuto.Mode == FireMode.Semi)
+            return true;
+
+        if (!GameState.IsPlayerControllable)
+        {
+            CancelBurst();
+            return true;
+        }
+
+        var held = Input.GetMouseButton(0);
+
+        if (FullAuto.Mode == FireMode.Burst)
+        {
+            if (_burstLeft <= 0)
+                return !held;
+        }
+        else if (!held)
+        {
+            return true;
+        }
 
         if (__instance._isReloading || __instance.IsReloading())
-            return true;
+            return Stop();
 
         if (__instance._mustAimToFire && !__instance.IsAiming)
-            return true;
+            return Stop();
 
         var weapon = __instance.GetRangedWeapon();
         if (!weapon)
-            return true;
+            return Stop();
 
         var ammo = weapon.GetAmmo();
         if (ammo == null || ammo.GetRemainingAmmo() <= 0)
-            return true;
+            return Stop();
 
         var now = Time.time;
         var interval = 60f / FullAuto.Rpm;
@@ -188,12 +275,25 @@ internal static class CheckFireInputPatch
         var shots = 0;
         while (_nextShot <= now && shots < MaxShotsPerFrame && ammo.GetRemainingAmmo() > 0)
         {
+            if (FullAuto.Mode == FireMode.Burst)
+            {
+                if (_burstLeft <= 0)
+                    break;
+                _burstLeft--;
+            }
+
             Fire(__instance, ammo);
             _nextShot += interval;
             shots++;
         }
 
         return false;
+    }
+
+    private static bool Stop()
+    {
+        _burstLeft = 0;
+        return true;
     }
 
     private static void Fire(RangedWeaponController controller, RangedWeapon.Ammo ammo)
@@ -220,7 +320,7 @@ internal static class CheckFireInputPatch
             RLog.Msg($"FullAuto first shot with {name}: ammo {before} -> {after}, audio {controller._playFireAudio}");
 
         if (FullAuto.Verbose)
-            RLog.Msg($"FullAuto shot {name}: ammo {before} -> {after}");
+            RLog.Msg($"FullAuto shot {name} ({FullAuto.Mode}): ammo {before} -> {after}");
     }
 
     private static bool IsAllowed(RangedWeaponController controller)
@@ -236,5 +336,3 @@ internal static class CheckFireInputPatch
         return allowed;
     }
 }
-
-

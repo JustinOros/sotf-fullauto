@@ -1,8 +1,8 @@
 # FullAuto
 
-Hold the fire button to shoot any gun full-auto in Sons of the Forest.
+Hold the fire button to shoot guns full-auto in Sons of the Forest.
 
-Works with the pistol, revolver, shotgun, rifle and other guns. The fire rate is
+Works with the pistol, revolver, shotgun and rifle. The fire rate is
 adjustable and your settings are saved between sessions.
 
 ## Multiplayer
@@ -43,30 +43,36 @@ Mods\FullAuto\manifest.json
 
 Equip a gun and hold the fire button.
 
-| Control | Action |
-| --- | --- |
-| F8 | Toggle the mod on or off |
-| F1 | Open the console |
+With a gun equipped, click the middle mouse button to cycle fire modes:
 
-Console commands:
+| Mode | Behavior |
+| --- | --- |
+| Full-auto | Fires while the button is held |
+| 3-round burst | Fires 3 shots per click |
+| Semi-auto | Normal game behavior, one shot per click |
+
+The mod starts in full-auto every time the game loads.
+
+Press F1 to open the console, then use these commands:
 
 | Command | Action |
 | --- | --- |
 | `fullauto` | Show current settings |
 | `fullauto on` | Enable |
-| `fullauto off` | Disable |
-| `fullauto rpm 1200` | Set the fire rate, 60 to 6000 rounds per minute |
-| `fullauto mode shoot` | Change the fire method, `shoot`, `fire` or `trigger` |
+| `fullauto off` | Disable until the game restarts |
+| `fullauto toggle` | Switch between on and off |
+| `fullauto rpm 1200` | Set the fire rate, 60 to 3000 rounds per minute |
+| `fullauto debug` | Log every shot to `_RedLoader\Latest.log` |
 
-The default is 900 rpm with mode `shoot`. If a gun does not fire full-auto, try
-another mode.
+The default is 900 rpm. The rpm also sets how fast burst shots fire.
 
-Settings are saved to `UserData\FullAuto.cfg` in your game folder.
+The rpm is saved to `UserData\FullAuto.txt` in your game folder.
 
-## Excluded weapons
+## Supported weapons
 
-The bow, slingshot, rope gun and thrown items such as grenades, molotovs, time
-bombs and rocks keep their normal behavior.
+Only the pistol, revolver, shotgun and rifle are affected. Bows, the crossbow,
+slingshot, flare gun, stun gun, rope gun and thrown items keep their normal
+behavior.
 
 ## Building from source
 
@@ -83,4 +89,3 @@ the game is not found automatically.
 ## Troubleshooting
 
 Check `_RedLoader\Latest.log` in your game folder. FullAuto logs a line when it
-
