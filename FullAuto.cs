@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using HarmonyLib;
@@ -556,3 +555,4 @@ internal static class CheckFireInputPatch
         return allowed;
     }
 }
+
