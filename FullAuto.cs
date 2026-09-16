@@ -9,6 +9,7 @@ using SonsSdk;
 using SonsSdk.Attributes;
 using TheForest.Utils;
 using UnityEngine;
+using SonsInput = Sons.Input.InputSystem;
 
 namespace FullAuto;
 
@@ -178,7 +179,7 @@ internal static class CheckFireInputPatch
 {
     private const int MaxShotsPerFrame = 4;
     private const int BurstSize = 3;
-    private const float ReleaseTime = 0.05f;
+    private const float ReleaseTime = 0.15f;
 
     private static readonly HashSet<string> Guns = new()
     {
@@ -196,6 +197,8 @@ internal static class CheckFireInputPatch
     private static float _lastGunTime = -1f;
     private static bool _triggerDown;
     private static float _releasedFor;
+    private static bool _actionFailed;
+    private static bool _holding;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -203,11 +206,85 @@ internal static class CheckFireInputPatch
     internal static void CancelBurst()
     {
         _burstLeft = 0;
+        _holding = false;
+    }
+
+    private static void HoldAfterBurst(RangedWeaponController controller)
+    {
+        var first = !_holding;
+        _holding = true;
+
+        try
+        {
+            controller.ClearTriggeredAttack();
+            if (first)
+                controller.AttackEndCallback();
+            controller._attackState = RangedWeaponController.AttackState.Idle;
+        }
+        catch (Exception e)
+        {
+            if (first)
+                RLog.Warning($"FullAuto could not end attack: {e.Message}");
+        }
+
+        if (first && FullAuto.Verbose)
+        {
+            RLog.Msg("FullAuto burst done, holding");
+            DumpAnimator("player", controller._playerAnimator);
+            DumpAnimator("weapon", controller._weaponAnimator);
+        }
+    }
+
+    private static void DumpAnimator(string label, Animator animator)
+    {
+        if (!animator)
+        {
+            RLog.Msg($"FullAuto {label} animator: none");
+            return;
+        }
+
+        try
+        {
+            var active = new List<string>();
+            foreach (var p in animator.parameters)
+            {
+                if (p.type == AnimatorControllerParameterType.Bool || p.type == AnimatorControllerParameterType.Trigger)
+                {
+                    if (animator.GetBool(p.name))
+                        active.Add($"{p.name}({p.type})");
+                }
+            }
+            RLog.Msg($"FullAuto {label} animator active: {string.Join(", ", active)}");
+        }
+        catch (Exception e)
+        {
+            RLog.Warning($"FullAuto could not read {label} animator: {e.Message}");
+        }
+    }
+
+    private static bool FirePressed()
+    {
+        if (Input.GetMouseButton(0))
+            return true;
+
+        if (_actionFailed)
+            return false;
+
+        try
+        {
+            return SonsInput.InputMapping.@default.PrimaryAction.IsPressed();
+        }
+        catch (Exception e)
+        {
+            _actionFailed = true;
+            RLog.Warning($"FullAuto could not read PrimaryAction: {e.Message}");
+            return false;
+        }
     }
 
     internal static void UpdateTrigger()
     {
-        if (Input.GetMouseButton(0))
+        if (FirePressed())
         {
             _releasedFor = 0f;
             if (_triggerDown)
@@ -220,8 +297,13 @@ internal static class CheckFireInputPatch
         }
 
         _releasedFor += Time.unscaledDeltaTime;
-        if (_releasedFor >= ReleaseTime)
+        if (_triggerDown && _releasedFor >= ReleaseTime)
+        {
             _triggerDown = false;
+            _holding = false;
+            if (FullAuto.Verbose)
+                RLog.Msg("FullAuto trigger released");
+        }
     }
 
     private static void StartBurst()
@@ -256,11 +338,12 @@ internal static class CheckFireInputPatch
         if (FullAuto.Mode == FireMode.Semi)
             return true;
 
-        var held = Input.GetMouseButton(0);
+        var pressed = FirePressed();
+        var held = _triggerDown || pressed;
 
         if (!GameState.IsPlayerControllable)
         {
-            CancelBurst();
+            _burstLeft = 0;
             return !held;
         }
 
@@ -275,15 +358,16 @@ internal static class CheckFireInputPatch
         if (ammo == null || ammo.GetRemainingAmmo() <= 0)
             return Stop();
 
-        if (FullAuto.Mode == FireMode.Burst)
+        if (FullAuto.Mode == FireMode.Burst && _burstLeft <= 0)
         {
-            if (_burstLeft <= 0)
-                return !held;
+            if (!held)
+                return true;
+            HoldAfterBurst(__instance);
+            return false;
         }
-        else if (!held)
-        {
+
+        if (FullAuto.Mode == FireMode.Auto && !pressed)
             return true;
-        }
 
         if (__instance._mustAimToFire && !__instance.IsAiming)
             return Stop();
@@ -312,12 +396,15 @@ internal static class CheckFireInputPatch
         if (FireDelays.TryGetValue(__instance.Pointer, out var delay))
             __instance._fireDelay = delay;
 
+        if (FullAuto.Mode == FireMode.Burst && _burstLeft <= 0 && held)
+            HoldAfterBurst(__instance);
+
         return false;
     }
 
     private static bool Stop()
     {
-        _burstLeft = 0;
+        CancelBurst();
         return true;
     }
 
