@@ -46,18 +46,17 @@ public class FullAuto : SonsMod
 
     private void OnUpdate()
     {
+        CheckFireInputPatch.UpdateTrigger();
+
         if (!Enabled || !GameState.IsPlayerControllable || !CheckFireInputPatch.HoldingGun)
             return;
-
-        if (Mode == FireMode.Burst && Input.GetMouseButtonDown(0))
-            CheckFireInputPatch.StartBurst();
 
         if (Input.GetMouseButtonDown(2))
         {
             Mode = Mode switch
             {
-                FireMode.Auto => FireMode.Burst,
-                FireMode.Burst => FireMode.Semi,
+                FireMode.Auto => FireMode.Semi,
+                FireMode.Semi => FireMode.Burst,
                 _ => FireMode.Auto
             };
             CheckFireInputPatch.CancelBurst();
@@ -122,9 +121,9 @@ public class FullAuto : SonsMod
     {
         return Mode switch
         {
-            FireMode.Auto => "Full-Auto",
+            FireMode.Auto => "Full-automatic",
             FireMode.Burst => "3-Round Burst",
-            _ => "Semi-Automatic"
+            _ => "Semi-automatic"
         };
     }
 
@@ -179,6 +178,7 @@ internal static class CheckFireInputPatch
 {
     private const int MaxShotsPerFrame = 4;
     private const int BurstSize = 3;
+    private const float ReleaseTime = 0.05f;
 
     private static readonly HashSet<string> Guns = new()
     {
@@ -189,10 +189,13 @@ internal static class CheckFireInputPatch
     };
 
     private static readonly Dictionary<IntPtr, bool> Allowed = new();
+    private static readonly Dictionary<IntPtr, float> FireDelays = new();
     private static readonly HashSet<string> Reported = new();
     private static float _nextShot;
     private static int _burstLeft;
     private static float _lastGunTime = -1f;
+    private static bool _triggerDown;
+    private static float _releasedFor;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -202,7 +205,26 @@ internal static class CheckFireInputPatch
         _burstLeft = 0;
     }
 
-    internal static void StartBurst()
+    internal static void UpdateTrigger()
+    {
+        if (Input.GetMouseButton(0))
+        {
+            _releasedFor = 0f;
+            if (_triggerDown)
+                return;
+
+            _triggerDown = true;
+            if (FullAuto.Enabled && FullAuto.Mode == FireMode.Burst && HoldingGun && GameState.IsPlayerControllable)
+                StartBurst();
+            return;
+        }
+
+        _releasedFor += Time.unscaledDeltaTime;
+        if (_releasedFor >= ReleaseTime)
+            _triggerDown = false;
+    }
+
+    private static void StartBurst()
     {
         if (_burstLeft > 0)
             return;
@@ -234,13 +256,24 @@ internal static class CheckFireInputPatch
         if (FullAuto.Mode == FireMode.Semi)
             return true;
 
+        var held = Input.GetMouseButton(0);
+
         if (!GameState.IsPlayerControllable)
         {
             CancelBurst();
-            return true;
+            return !held;
         }
 
-        var held = Input.GetMouseButton(0);
+        if (__instance._isReloading || __instance.IsReloading())
+            return Stop();
+
+        var weapon = __instance.GetRangedWeapon();
+        if (!weapon)
+            return Stop();
+
+        var ammo = weapon.GetAmmo();
+        if (ammo == null || ammo.GetRemainingAmmo() <= 0)
+            return Stop();
 
         if (FullAuto.Mode == FireMode.Burst)
         {
@@ -252,18 +285,7 @@ internal static class CheckFireInputPatch
             return true;
         }
 
-        if (__instance._isReloading || __instance.IsReloading())
-            return Stop();
-
         if (__instance._mustAimToFire && !__instance.IsAiming)
-            return Stop();
-
-        var weapon = __instance.GetRangedWeapon();
-        if (!weapon)
-            return Stop();
-
-        var ammo = weapon.GetAmmo();
-        if (ammo == null || ammo.GetRemainingAmmo() <= 0)
             return Stop();
 
         var now = Time.time;
@@ -286,6 +308,9 @@ internal static class CheckFireInputPatch
             _nextShot += interval;
             shots++;
         }
+
+        if (FireDelays.TryGetValue(__instance.Pointer, out var delay))
+            __instance._fireDelay = delay;
 
         return false;
     }
@@ -332,6 +357,8 @@ internal static class CheckFireInputPatch
         var name = controller.GetIl2CppType().Name;
         allowed = Guns.Contains(name);
         Allowed[ptr] = allowed;
+        if (allowed)
+            FireDelays[ptr] = controller._fireDelay;
         RLog.Msg($"FullAuto {name}: {(allowed ? "full-auto" : "ignored")}");
         return allowed;
     }

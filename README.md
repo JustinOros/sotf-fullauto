@@ -47,11 +47,11 @@ With a gun equipped, click the middle mouse button to cycle fire modes:
 
 | Mode | Behavior |
 | --- | --- |
-| Full-auto | Fires while the button is held |
-| 3-round burst | Fires 3 shots per click |
-| Semi-auto | Normal game behavior, one shot per click |
+| Full-automatic | Fires while the button is held |
+| Semi-automatic | Normal game behavior, one shot per click |
+| 3-Round Burst | Fires 3 shots, then release and press again for the next 3 |
 
-The mod starts in full-auto every time the game loads.
+The mod starts in full-automatic every time the game loads.
 
 Press F1 to open the console, then use these commands:
 
