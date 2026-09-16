@@ -3,7 +3,7 @@
   "id": "FullAuto",
   "name": "FullAuto",
   "author": "JustinOros",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Hold fire to shoot any gun full-auto at a configurable rate",
   "gameVersion": "1.0.0",
   "platform": "Client",
