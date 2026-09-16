@@ -24,10 +24,12 @@ public class FullAuto : SonsMod
 {
     internal const float MinRpm = 60f;
     internal const float MaxRpm = 3000f;
+    internal const float ReloadMultiplier = 2f;
 
     internal static bool Enabled = true;
     internal static float Rpm = 900f;
     internal static FireMode Mode = FireMode.Auto;
+    internal static bool FastReload;
     internal static bool Verbose;
 
     private static string _configPath;
@@ -42,12 +44,15 @@ public class FullAuto : SonsMod
     {
         _configPath = Path.Combine(LoaderEnvironment.UserDataDirectory, "FullAuto.txt");
         Load();
-        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Guns only. Middle mouse cycles modes. Console: fullauto");
+        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Fast reload: {FastReload}. Guns only. Middle mouse cycles modes. Console: fullauto");
     }
 
     private void OnUpdate()
     {
         CheckFireInputPatch.UpdateTrigger();
+
+        if (!CheckFireInputPatch.HoldingGun)
+            CheckFireInputPatch.RestoreReloadSpeed();
 
         if (!Enabled || !GameState.IsPlayerControllable || !CheckFireInputPatch.HoldingGun)
             return;
@@ -85,13 +90,24 @@ public class FullAuto : SonsMod
             case "off":
                 Enabled = false;
                 break;
-            case "toggle":
-                Enabled = !Enabled;
-                break;
             case "debug":
                 Verbose = !Verbose;
                 SonsTools.ShowMessage($"FullAuto debug: {Verbose}");
                 RLog.Msg($"FullAuto debug: {Verbose}");
+                return;
+            case "fastreload":
+                if (parts.Length > 1 && (parts[1].ToLowerInvariant() == "on" || parts[1].ToLowerInvariant() == "off"))
+                {
+                    FastReload = parts[1].ToLowerInvariant() == "on";
+                    if (!FastReload)
+                        CheckFireInputPatch.RestoreReloadSpeed();
+                    Save();
+                    var text = $"Fast reload {(FastReload ? "ON" : "OFF")}";
+                    SonsTools.ShowMessage(text);
+                    RLog.Msg(text);
+                    return;
+                }
+                Usage();
                 return;
             case "rpm":
                 if (parts.Length > 1 && float.TryParse(parts[1], out var value))
@@ -113,7 +129,7 @@ public class FullAuto : SonsMod
 
     private static void Usage()
     {
-        var text = $"Usage: fullauto [on|off|toggle|debug] or fullauto rpm <{MinRpm}-{MaxRpm}>";
+        var text = $"Usage: fullauto [on|off|debug], fullauto rpm <{MinRpm}-{MaxRpm}>, fullauto fastreload on|off";
         SonsTools.ShowMessage(text, 5f);
         RLog.Msg(text);
     }
@@ -135,7 +151,8 @@ public class FullAuto : SonsMod
 
     internal static void Announce()
     {
-        var text = Enabled ? $"{ModeName()} ({Rpm} RPM)" : "FullAuto OFF";
+        var reload = FastReload ? ", fast reload on" : "";
+        var text = Enabled ? $"{ModeName()} ({Rpm} RPM{reload})" : $"FullAuto OFF{reload}";
         SonsTools.ShowMessage(text);
         RLog.Msg(text);
     }
@@ -158,6 +175,8 @@ public class FullAuto : SonsMod
 
                 if (key == "rpm" && float.TryParse(val, out var rpm))
                     Rpm = Mathf.Clamp(rpm, MinRpm, MaxRpm);
+                else if (key == "fastreload" && bool.TryParse(val, out var fast))
+                    FastReload = fast;
             }
         }
         catch (Exception e)
@@ -170,7 +189,7 @@ public class FullAuto : SonsMod
     {
         try
         {
-            File.WriteAllText(_configPath, $"rpm={Rpm}\n");
+            File.WriteAllText(_configPath, $"rpm={Rpm}\nfastreload={FastReload.ToString().ToLowerInvariant()}\n");
         }
         catch (Exception e)
         {
@@ -205,6 +224,11 @@ internal static class CheckFireInputPatch
     private static float _releasedFor;
     private static bool _actionFailed;
     private static bool _holding;
+    private static RangedWeaponController _speedGun;
+    private static Animator _speedPlayer;
+    private static Animator _speedWeapon;
+    private static float _playerSpeed = 1f;
+    private static float _weaponSpeed = 1f;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -213,6 +237,73 @@ internal static class CheckFireInputPatch
     {
         _burstLeft = 0;
         _holding = false;
+    }
+
+    private static void UpdateReloadSpeed(RangedWeaponController controller, bool allowed)
+    {
+        var want = allowed && FullAuto.FastReload && (controller._isReloading || controller.IsReloading());
+
+        if (!want)
+        {
+            RestoreReloadSpeed();
+            return;
+        }
+
+        if (_speedGun != null && _speedGun.Pointer == controller.Pointer)
+            return;
+
+        RestoreReloadSpeed();
+
+        try
+        {
+            _speedGun = controller;
+            _speedPlayer = controller._playerAnimator;
+            _speedWeapon = controller._weaponAnimator;
+
+            if (_speedPlayer)
+            {
+                _playerSpeed = _speedPlayer.speed;
+                _speedPlayer.speed = _playerSpeed * FullAuto.ReloadMultiplier;
+            }
+
+            if (_speedWeapon)
+            {
+                _weaponSpeed = _speedWeapon.speed;
+                _speedWeapon.speed = _weaponSpeed * FullAuto.ReloadMultiplier;
+            }
+
+            if (FullAuto.Verbose)
+                RLog.Msg($"FullAuto fast reload start, player {_playerSpeed} weapon {_weaponSpeed}");
+        }
+        catch (Exception e)
+        {
+            RLog.Warning($"FullAuto could not speed up reload: {e.Message}");
+        }
+    }
+
+    internal static void RestoreReloadSpeed()
+    {
+        if (_speedGun == null)
+            return;
+
+        try
+        {
+            if (_speedPlayer)
+                _speedPlayer.speed = _playerSpeed;
+            if (_speedWeapon)
+                _speedWeapon.speed = _weaponSpeed;
+        }
+        catch (Exception e)
+        {
+            RLog.Warning($"FullAuto could not restore reload speed: {e.Message}");
+        }
+
+        _speedGun = null;
+        _speedPlayer = null;
+        _speedWeapon = null;
+
+        if (FullAuto.Verbose)
+            RLog.Msg("FullAuto fast reload end");
     }
 
     private static void HoldAfterBurst(RangedWeaponController controller)
@@ -337,6 +428,8 @@ internal static class CheckFireInputPatch
 
         var allowed = IsAllowed(__instance);
         var ptr = __instance.Pointer;
+
+        UpdateReloadSpeed(__instance, allowed);
 
         if (allowed && FullAuto.Enabled && (!HoldingGun || ptr != _lastGunPtr))
             FullAuto.ShowMode();
