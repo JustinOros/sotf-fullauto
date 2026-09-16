@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using HarmonyLib;
@@ -53,7 +54,7 @@ public class FullAuto : SonsMod
         if (!CheckFireInputPatch.HoldingGun)
             CheckFireInputPatch.RestoreReloadSpeed();
 
-        if (!Enabled || !GameState.IsPlayerControllable || !CheckFireInputPatch.HoldingGun)
+        if (!Enabled || !CheckFireInputPatch.InGame || !CheckFireInputPatch.HoldingGun)
             return;
 
         if (Input.GetMouseButtonDown(2))
@@ -232,6 +233,8 @@ internal static class CheckFireInputPatch
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
 
+    internal static bool InGame => GameState.IsPlayerControllable && !Cursor.visible && !LocalPlayer.IsInInventory && Time.timeScale > 0f;
+
     internal static void CancelBurst()
     {
         _burstLeft = 0;
@@ -387,7 +390,7 @@ internal static class CheckFireInputPatch
                 return;
 
             _triggerDown = true;
-            if (FullAuto.Enabled && FullAuto.Mode == FireMode.Burst && HoldingGun && GameState.IsPlayerControllable)
+            if (FullAuto.Enabled && FullAuto.Mode == FireMode.Burst && HoldingGun && InGame)
                 StartBurst();
             return;
         }
@@ -446,7 +449,7 @@ internal static class CheckFireInputPatch
         var pressed = FirePressed();
         var held = _triggerDown || pressed;
 
-        if (!GameState.IsPlayerControllable)
+        if (!InGame)
         {
             _burstLeft = 0;
             return !held;
@@ -555,4 +558,3 @@ internal static class CheckFireInputPatch
         return allowed;
     }
 }
-
