@@ -89,20 +89,4 @@ behavior.
 
 ## Building from source
 
-Requires the .NET 8 SDK and RedLoader installed with its game assemblies
-generated.
 
-```powershell
-.\build.ps1 -Install
-```
-
-Use `-Package` to build `FullAuto.zip` for a release. Pass `-GameDir "path"` if
-the game is not found automatically.
-
-## Troubleshooting
-
-Check `_RedLoader\Latest.log` in your game folder. FullAuto logs a line when it
-<<<<<<< HEAD
-
-=======
->>>>>>> 06d5036e1fcbd2591f5549dcc46e20a7aba461f8
