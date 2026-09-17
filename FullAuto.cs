@@ -30,6 +30,7 @@ public class FullAuto : SonsMod
     internal static float Rpm = 900f;
     internal static FireMode Mode = FireMode.Auto;
     internal static bool FastReload;
+    internal static KeyCode FlashlightKey = KeyCode.F;
     internal static bool Verbose;
 
     private static string _configPath;
@@ -44,7 +45,8 @@ public class FullAuto : SonsMod
     {
         _configPath = Path.Combine(LoaderEnvironment.UserDataDirectory, "FullAuto.txt");
         Load();
-        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Fast reload: {FastReload}. Guns only. Middle mouse cycles modes. Console: fullauto");
+        Save();
+        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Fast reload: {FastReload}. Flashlight key: {FlashlightKey}. Guns only. Middle mouse cycles modes. Console: fullauto");
     }
 
     private void OnUpdate()
@@ -53,6 +55,9 @@ public class FullAuto : SonsMod
 
         if (!CheckFireInputPatch.HoldingGun)
             CheckFireInputPatch.RestoreReloadSpeed();
+
+        if (Input.GetKeyDown(FlashlightKey) && CheckFireInputPatch.InGame && CheckFireInputPatch.HoldingRanged)
+            CheckFireInputPatch.ToggleFlashlight();
 
         if (!Enabled || !CheckFireInputPatch.InGame || !CheckFireInputPatch.HoldingGun)
             return;
@@ -177,6 +182,8 @@ public class FullAuto : SonsMod
                     Rpm = Mathf.Clamp(rpm, MinRpm, MaxRpm);
                 else if (key == "fastreload" && bool.TryParse(val, out var fast))
                     FastReload = fast;
+                else if (key == "flashlightkey" && Enum.TryParse<KeyCode>(val, true, out var flashKey))
+                    FlashlightKey = flashKey;
             }
         }
         catch (Exception e)
@@ -189,7 +196,7 @@ public class FullAuto : SonsMod
     {
         try
         {
-            File.WriteAllText(_configPath, $"rpm={Rpm}\nfastreload={FastReload.ToString().ToLowerInvariant()}\n");
+            File.WriteAllText(_configPath, $"rpm={Rpm}\nfastreload={FastReload.ToString().ToLowerInvariant()}\nflashlightkey={FlashlightKey}\n");
         }
         catch (Exception e)
         {
@@ -229,11 +236,72 @@ internal static class CheckFireInputPatch
     private static Animator _speedWeapon;
     private static float _playerSpeed = 1f;
     private static float _weaponSpeed = 1f;
+    private static RangedWeaponController _currentRanged;
+    private static float _rangedTime = -1f;
+    private static bool _flashlightOff;
+    private static IntPtr _lightsOwner = IntPtr.Zero;
+    private static readonly List<Light> Lights = new();
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
 
     internal static bool InGame => GameState.IsPlayerControllable && !Cursor.visible && !LocalPlayer.IsInInventory && Time.timeScale > 0f;
+
+    internal static bool HoldingRanged => _currentRanged != null && _rangedTime >= 0f && Time.time - _rangedTime < 0.25f;
+
+    private static void FindLights(RangedWeaponController controller)
+    {
+        Lights.Clear();
+        _lightsOwner = controller.Pointer;
+
+        try
+        {
+            foreach (var light in controller.GetComponentsInChildren<Light>(true))
+            {
+                if (light && light.type == LightType.Spot)
+                    Lights.Add(light);
+            }
+
+            if (FullAuto.Verbose)
+            {
+                foreach (var light in Lights)
+                    RLog.Msg($"FullAuto flashlight found: {light.gameObject.name}");
+                if (Lights.Count == 0)
+                    RLog.Msg($"FullAuto no flashlight found on {controller.GetIl2CppType().Name}");
+            }
+        }
+        catch (Exception e)
+        {
+            RLog.Warning($"FullAuto could not find flashlight: {e.Message}");
+        }
+    }
+
+    internal static void ToggleFlashlight()
+    {
+        var controller = _currentRanged;
+        if (!controller)
+            return;
+
+        FindLights(controller);
+
+        if (Lights.Count == 0)
+            return;
+
+        _flashlightOff = !_flashlightOff;
+        ApplyFlashlight();
+
+        if (FullAuto.Verbose)
+            RLog.Msg($"FullAuto flashlight {(_flashlightOff ? "off" : "on")}");
+    }
+
+    private static void ApplyFlashlight()
+    {
+        foreach (var light in Lights)
+        {
+            if (light && light.enabled == _flashlightOff)
+                light.enabled = !_flashlightOff;
+        }
+    }
 
     internal static void CancelBurst()
     {
@@ -430,6 +498,16 @@ internal static class CheckFireInputPatch
 
         var allowed = IsAllowed(__instance);
         var ptr = __instance.Pointer;
+
+        _currentRanged = __instance;
+        _rangedTime = Time.time;
+
+        if (_flashlightOff)
+        {
+            if (_lightsOwner != ptr)
+                FindLights(__instance);
+            ApplyFlashlight();
+        }
 
         UpdateReloadSpeed(__instance, allowed);
 
