@@ -28,7 +28,14 @@ public class FullAuto : SonsMod
 
     internal static bool Enabled = true;
     internal static float Rpm = 900f;
-    internal static FireMode Mode = FireMode.Auto;
+    internal static readonly Dictionary<string, FireMode> Modes = new();
+    internal static string CurrentGun = "";
+
+    internal static FireMode Mode
+    {
+        get => Modes.TryGetValue(CurrentGun, out var mode) ? mode : FireMode.Auto;
+        set => Modes[CurrentGun] = value;
+    }
     internal static bool FastReload;
     internal static KeyCode FlashlightKey = KeyCode.F;
     internal static bool Verbose;
@@ -71,8 +78,9 @@ public class FullAuto : SonsMod
                 _ => FireMode.Auto
             };
             CheckFireInputPatch.CancelBurst();
+            Save();
             ShowMode();
-            RLog.Msg($"FullAuto mode: {ModeName()}");
+            RLog.Msg($"FullAuto {CurrentGun} mode: {ModeName()}");
         }
     }
 
@@ -184,6 +192,8 @@ public class FullAuto : SonsMod
                     FastReload = fast;
                 else if (key == "flashlightkey" && Enum.TryParse<KeyCode>(val, true, out var flashKey))
                     FlashlightKey = flashKey;
+                else if (key.StartsWith("mode.") && Enum.TryParse<FireMode>(val, true, out var gunMode))
+                    Modes[key.Substring(5)] = gunMode;
             }
         }
         catch (Exception e)
@@ -196,7 +206,16 @@ public class FullAuto : SonsMod
     {
         try
         {
-            File.WriteAllText(_configPath, $"rpm={Rpm}\nfastreload={FastReload.ToString().ToLowerInvariant()}\nflashlightkey={FlashlightKey}\n");
+            var sb = new System.Text.StringBuilder();
+            sb.Append($"rpm={Rpm}\n");
+            sb.Append($"fastreload={FastReload.ToString().ToLowerInvariant()}\n");
+            sb.Append($"flashlightkey={FlashlightKey}\n");
+            foreach (var gun in CheckFireInputPatch.GunKeys)
+            {
+                var mode = Modes.TryGetValue(gun, out var m) ? m : FireMode.Auto;
+                sb.Append($"mode.{gun}={mode.ToString().ToLowerInvariant()}\n");
+            }
+            File.WriteAllText(_configPath, sb.ToString());
         }
         catch (Exception e)
         {
@@ -212,13 +231,17 @@ internal static class CheckFireInputPatch
     private const int BurstSize = 3;
     private const float ReleaseTime = 0.15f;
 
-    private static readonly HashSet<string> Guns = new()
+    private static readonly Dictionary<string, string> Guns = new()
     {
-        "CompactPistolWeaponController",
-        "RevolverWeaponController",
-        "ShotgunWeaponController",
-        "RifleAnimatorController"
+        { "CompactPistolWeaponController", "pistol" },
+        { "RevolverWeaponController", "revolver" },
+        { "ShotgunWeaponController", "shotgun" },
+        { "RifleAnimatorController", "rifle" }
     };
+
+    internal static IEnumerable<string> GunKeys => Guns.Values;
+
+    private static readonly Dictionary<IntPtr, string> GunNames = new();
 
     private static readonly Dictionary<IntPtr, bool> Allowed = new();
     private static readonly Dictionary<IntPtr, float> FireDelays = new();
@@ -511,8 +534,17 @@ internal static class CheckFireInputPatch
 
         UpdateReloadSpeed(__instance, allowed);
 
-        if (allowed && FullAuto.Enabled && (!HoldingGun || ptr != _lastGunPtr))
-            FullAuto.ShowMode();
+        if (allowed && GunNames.TryGetValue(ptr, out var gunName))
+        {
+            var switched = !HoldingGun || ptr != _lastGunPtr;
+            FullAuto.CurrentGun = gunName;
+            if (switched)
+            {
+                CancelBurst();
+                if (FullAuto.Enabled)
+                    FullAuto.ShowMode();
+            }
+        }
 
         if (allowed)
             _lastGunPtr = ptr;
@@ -628,12 +660,14 @@ internal static class CheckFireInputPatch
             return allowed;
 
         var name = controller.GetIl2CppType().Name;
-        allowed = Guns.Contains(name);
+        allowed = Guns.TryGetValue(name, out var gunKey);
         Allowed[ptr] = allowed;
         if (allowed)
+        {
             FireDelays[ptr] = controller._fireDelay;
+            GunNames[ptr] = gunKey;
+        }
         RLog.Msg($"FullAuto {name}: {(allowed ? "full-auto" : "ignored")}");
         return allowed;
     }
 }
-

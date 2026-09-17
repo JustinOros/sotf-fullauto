@@ -64,7 +64,11 @@ With a gun equipped, click the middle mouse button to cycle fire modes:
 | Semi-automatic | Normal game behavior, one shot per click |
 | 3-Round Burst | Fires 3 shots, then release and press again for the next 3 |
 
-The mod starts in full-automatic every time the game loads.
+Each gun remembers its own fire mode, even after you restart the game. Guns
+start in full-automatic until you change them.
+
+Press F to turn a flashlight attached to your gun or crossbow on or off.
+The key can be changed with the `flashlightkey=` line in `UserData\FullAuto.txt`.
 
 Press F1 to open the console, then use these commands:
 
@@ -73,13 +77,14 @@ Press F1 to open the console, then use these commands:
 | `fullauto` | Show current settings |
 | `fullauto on` | Enable |
 | `fullauto off` | Disable until the game restarts |
-| `fullauto toggle` | Switch between on and off |
 | `fullauto rpm 1200` | Set the fire rate, 60 to 3000 rounds per minute |
+| `fullauto fastreload on` | Reload guns twice as fast, `off` to turn it back off |
 | `fullauto debug` | Log every shot to `_RedLoader\Latest.log` |
 
 The default is 900 rpm. The rpm also sets how fast burst shots fire.
 
-The rpm is saved to `UserData\FullAuto.txt` in your game folder.
+The rpm, fast reload, flashlight key and each gun's fire mode are saved to
+`UserData\FullAuto.txt` in your game folder.
 
 ## Supported weapons
 
@@ -89,5 +94,17 @@ behavior.
 
 ## Building from source
 
+Requires the .NET 8 SDK and RedLoader installed with its game assemblies
+generated.
 
+```powershell
+.\build.ps1 -Install
+```
 
+Use `-Package` to build `FullAuto.zip` for a release. Pass `-GameDir "path"` if
+the game is not found automatically.
+
+## Troubleshooting
+
+Check `_RedLoader\Latest.log` in your game folder. FullAuto logs a line when it loads and a line for each weapon showing whether it is full-auto or
+ignored.
