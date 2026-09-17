@@ -12,7 +12,20 @@ players do not need the mod.
 
 ## Installation
 
-### Step 1: Install RedLoader
+### Easy install
+
+Close the game, open PowerShell and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/JustinOros/sotf-fullauto/main/Install.ps1 | iex
+```
+
+It finds your game, installs RedLoader if needed, and installs the latest
+FullAuto. Run it again any time to update.
+
+### Manual install
+
+#### Step 1: Install RedLoader
 
 [RedLoader](https://github.com/ToniMacaroni/RedLoader/releases/latest) is the mod
 loader for Sons of the Forest. The game cannot load any mod without it, so
@@ -27,7 +40,7 @@ install it first. You only have to do this once.
    takes a few minutes while RedLoader processes the game files
 4. Check that `MODS` appears on the main menu, then quit
 
-### Step 2: Install FullAuto
+#### Step 2: Install FullAuto
 
 1. Download `FullAuto.zip` from the
    [latest release](https://github.com/JustinOros/sotf-fullauto/releases/latest)
@@ -89,4 +102,7 @@ the game is not found automatically.
 ## Troubleshooting
 
 Check `_RedLoader\Latest.log` in your game folder. FullAuto logs a line when it
+<<<<<<< HEAD
 
+=======
+>>>>>>> 06d5036e1fcbd2591f5549dcc46e20a7aba461f8
