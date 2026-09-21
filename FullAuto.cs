@@ -374,7 +374,7 @@ internal static class CheckFireInputPatch
             return;
 
         var ammo = weapon.GetAmmo();
-        if (ammo == null || !ammo.IsEmpty() || FirePressed())
+        if (ammo == null || !ammo.IsEmpty())
         {
             _emptySince = -1f;
             return;
@@ -390,10 +390,14 @@ internal static class CheckFireInputPatch
         if (now - _emptySince < AutoReloadDelay || now < _nextReloadTry)
             return;
 
-        _nextReloadTry = now + 2f;
+        _nextReloadTry = now + 0.5f;
 
         if (!controller.CanReload())
+        {
+            if (FullAuto.Verbose)
+                RLog.Msg($"FullAuto auto reload waiting, game says cannot reload (aiming: {controller.IsAiming})");
             return;
+        }
 
         if (PressReloadKey())
         {
