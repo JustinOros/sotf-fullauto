@@ -3,7 +3,7 @@
   "id": "FullAuto",
   "name": "FullAuto",
   "author": "JustinOros",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Full-auto, semi-auto and 3-round burst for guns, with fast reload and a flashlight toggle",
   "gameVersion": "1.0.0",
   "platform": "Client",
