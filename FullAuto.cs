@@ -248,6 +248,7 @@ internal static class CheckFireInputPatch
     private const float ReleaseTime = 0.15f;
     private const float AutoReloadDelay = 0.2f;
     private const float AutoReloadNextDelay = 0.05f;
+    private const float AutoReloadRoundTime = 0.9f;
 
     private static readonly Dictionary<string, string> Guns = new()
     {
@@ -286,6 +287,8 @@ internal static class CheckFireInputPatch
     private static float _nextReloadTry;
     private static bool _autoReloading;
     private static IntPtr _autoReloadGun = IntPtr.Zero;
+    private static float _lastReloadCall = -10f;
+    private static bool _sawReloading;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -359,6 +362,7 @@ internal static class CheckFireInputPatch
 
         if (controller._isReloading || controller.IsReloading() || controller.IsReloadQueued())
         {
+            _sawReloading = true;
             _emptySince = -1f;
             return;
         }
@@ -371,8 +375,15 @@ internal static class CheckFireInputPatch
         if (ammo == null)
             return;
 
-        if (_autoReloading && (_autoReloadGun != controller.Pointer || ammo.IsFull() || FirePressed()))
+        if (_autoReloading && (_autoReloadGun != controller.Pointer || ammo.IsFull()))
             _autoReloading = false;
+
+        if (FirePressed())
+        {
+            _autoReloading = false;
+            _emptySince = -1f;
+            return;
+        }
 
         if (!ammo.IsEmpty() && !_autoReloading)
         {
@@ -391,6 +402,10 @@ internal static class CheckFireInputPatch
         if (now - _emptySince < wait || now < _nextReloadTry)
             return;
 
+        var roundTime = FullAuto.FastReload ? AutoReloadRoundTime / FullAuto.ReloadMultiplier : AutoReloadRoundTime;
+        if (_autoReloading && !_sawReloading && now - _lastReloadCall < roundTime)
+            return;
+
         _nextReloadTry = now + 0.3f;
 
         if (!controller.CanReload())
@@ -402,6 +417,8 @@ internal static class CheckFireInputPatch
         controller.Reload();
         _autoReloading = true;
         _autoReloadGun = controller.Pointer;
+        _lastReloadCall = now;
+        _sawReloading = false;
 
         if (FullAuto.Verbose)
             RLog.Msg($"FullAuto auto reload {controller.GetIl2CppType().Name}, ammo {ammo.GetRemainingAmmo()}/{ammo.GetCapacity()}");
