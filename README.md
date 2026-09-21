@@ -79,13 +79,13 @@ Press F1 to open the console, then use these commands:
 | `fullauto off` | Disable until the game restarts |
 | `fullauto rpm 1200` | Set the fire rate, 60 to 3000 rounds per minute |
 | `fullauto fastreload on` | Reload guns twice as fast, `off` to turn it back off |
-| `fullauto autoreload on` | Reload automatically when the gun is empty, `off` to turn it back off |
+| `fullauto autoreload on` | Reload automatically when the gun is empty, `off` to turn it back off. It presses your reload key for you, so if you changed it from R in the game settings, set `reloadkey=` in `FullAuto.txt` to match |
 | `fullauto debug` | Log every shot to `_RedLoader\Latest.log` |
 
 The default is 900 rpm. The rpm also sets how fast burst shots fire.
 
-The rpm, fast reload, auto reload, flashlight key and each gun's fire mode are
-saved to
+The rpm, fast reload, auto reload, flashlight key, reload key and each gun's fire
+mode are saved to
 `UserData\FullAuto.txt` in your game folder.
 
 ## Supported weapons

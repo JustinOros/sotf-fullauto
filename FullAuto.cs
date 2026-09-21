@@ -39,6 +39,7 @@ public class FullAuto : SonsMod
     internal static bool FastReload;
     internal static bool AutoReload;
     internal static KeyCode FlashlightKey = KeyCode.F;
+    internal static string ReloadKey = "r";
     internal static bool Verbose;
 
     private static string _configPath;
@@ -60,6 +61,7 @@ public class FullAuto : SonsMod
     private void OnUpdate()
     {
         CheckFireInputPatch.UpdateTrigger();
+        CheckFireInputPatch.UpdateReloadKey();
 
         if (!CheckFireInputPatch.HoldingGun)
             CheckFireInputPatch.RestoreReloadSpeed();
@@ -205,6 +207,8 @@ public class FullAuto : SonsMod
                     FastReload = fast;
                 else if (key == "autoreload" && bool.TryParse(val, out var auto))
                     AutoReload = auto;
+                else if (key == "reloadkey" && val.Length > 0)
+                    ReloadKey = val.ToLowerInvariant();
                 else if (key == "flashlightkey" && Enum.TryParse<KeyCode>(val, true, out var flashKey))
                     FlashlightKey = flashKey;
                 else if (key.StartsWith("mode.") && Enum.TryParse<FireMode>(val, true, out var gunMode))
@@ -226,6 +230,7 @@ public class FullAuto : SonsMod
             sb.Append($"fastreload={FastReload.ToString().ToLowerInvariant()}\n");
             sb.Append($"autoreload={AutoReload.ToString().ToLowerInvariant()}\n");
             sb.Append($"flashlightkey={FlashlightKey}\n");
+            sb.Append($"reloadkey={ReloadKey}\n");
             foreach (var gun in CheckFireInputPatch.GunKeys)
             {
                 var mode = Modes.TryGetValue(gun, out var m) ? m : FireMode.Auto;
@@ -247,8 +252,6 @@ internal static class CheckFireInputPatch
     private const int BurstSize = 3;
     private const float ReleaseTime = 0.15f;
     private const float AutoReloadDelay = 0.2f;
-    private const float AutoReloadNextDelay = 0.05f;
-    private const float AutoReloadRoundTime = 0.9f;
 
     private static readonly Dictionary<string, string> Guns = new()
     {
@@ -285,10 +288,11 @@ internal static class CheckFireInputPatch
     private static readonly List<Light> Lights = new();
     private static float _emptySince = -1f;
     private static float _nextReloadTry;
-    private static bool _autoReloading;
-    private static IntPtr _autoReloadGun = IntPtr.Zero;
-    private static float _lastReloadCall = -10f;
-    private static bool _sawReloading;
+    private static UnityEngine.InputSystem.Controls.KeyControl _reloadControl;
+    private static string _reloadControlKey;
+    private static UnityEngine.InputSystem.Controls.KeyControl _pressedKey;
+    private static int _releaseFrame = -1;
+    private static bool _keySimFailed;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -356,13 +360,11 @@ internal static class CheckFireInputPatch
         if (!FullAuto.AutoReload || !InGame)
         {
             _emptySince = -1f;
-            _autoReloading = false;
             return;
         }
 
         if (controller._isReloading || controller.IsReloading() || controller.IsReloadQueued())
         {
-            _sawReloading = true;
             _emptySince = -1f;
             return;
         }
@@ -372,20 +374,7 @@ internal static class CheckFireInputPatch
             return;
 
         var ammo = weapon.GetAmmo();
-        if (ammo == null)
-            return;
-
-        if (_autoReloading && (_autoReloadGun != controller.Pointer || ammo.IsFull()))
-            _autoReloading = false;
-
-        if (FirePressed())
-        {
-            _autoReloading = false;
-            _emptySince = -1f;
-            return;
-        }
-
-        if (!ammo.IsEmpty() && !_autoReloading)
+        if (ammo == null || !ammo.IsEmpty() || FirePressed())
         {
             _emptySince = -1f;
             return;
@@ -398,30 +387,76 @@ internal static class CheckFireInputPatch
             return;
         }
 
-        var wait = _autoReloading ? AutoReloadNextDelay : AutoReloadDelay;
-        if (now - _emptySince < wait || now < _nextReloadTry)
+        if (now - _emptySince < AutoReloadDelay || now < _nextReloadTry)
             return;
 
-        var roundTime = FullAuto.FastReload ? AutoReloadRoundTime / FullAuto.ReloadMultiplier : AutoReloadRoundTime;
-        if (_autoReloading && !_sawReloading && now - _lastReloadCall < roundTime)
-            return;
-
-        _nextReloadTry = now + 0.3f;
+        _nextReloadTry = now + 2f;
 
         if (!controller.CanReload())
+            return;
+
+        if (PressReloadKey())
         {
-            _autoReloading = false;
+            if (FullAuto.Verbose)
+                RLog.Msg($"FullAuto auto reload pressed {FullAuto.ReloadKey} on {controller.GetIl2CppType().Name}");
             return;
         }
 
-        controller.Reload();
-        _autoReloading = true;
-        _autoReloadGun = controller.Pointer;
-        _lastReloadCall = now;
-        _sawReloading = false;
+        controller._reloadQueued = true;
 
         if (FullAuto.Verbose)
-            RLog.Msg($"FullAuto auto reload {controller.GetIl2CppType().Name}, ammo {ammo.GetRemainingAmmo()}/{ammo.GetCapacity()}");
+            RLog.Msg($"FullAuto auto reload queued on {controller.GetIl2CppType().Name}");
+    }
+
+    private static bool PressReloadKey()
+    {
+        if (_keySimFailed || _pressedKey != null)
+            return false;
+
+        try
+        {
+            if (_reloadControl == null || _reloadControlKey != FullAuto.ReloadKey)
+            {
+                _reloadControlKey = FullAuto.ReloadKey;
+                var control = UnityEngine.InputSystem.InputSystem.FindControl($"<Keyboard>/{FullAuto.ReloadKey}");
+                _reloadControl = control?.TryCast<UnityEngine.InputSystem.Controls.KeyControl>();
+            }
+
+            if (_reloadControl == null)
+            {
+                _keySimFailed = true;
+                RLog.Warning($"FullAuto could not find reload key {FullAuto.ReloadKey}");
+                return false;
+            }
+
+            UnityEngine.InputSystem.InputControlExtensions.QueueValueChange<float>(_reloadControl, 1f, -1d);
+            _pressedKey = _reloadControl;
+            _releaseFrame = Time.frameCount + 3;
+            return true;
+        }
+        catch (Exception e)
+        {
+            _keySimFailed = true;
+            RLog.Warning($"FullAuto could not press reload key: {e.Message}");
+            return false;
+        }
+    }
+
+    internal static void UpdateReloadKey()
+    {
+        if (_pressedKey == null || Time.frameCount < _releaseFrame)
+            return;
+
+        try
+        {
+            UnityEngine.InputSystem.InputControlExtensions.QueueValueChange<float>(_pressedKey, 0f, -1d);
+        }
+        catch (Exception e)
+        {
+            RLog.Warning($"FullAuto could not release reload key: {e.Message}");
+        }
+
+        _pressedKey = null;
     }
 
     internal static void CancelBurst()
