@@ -247,6 +247,7 @@ internal static class CheckFireInputPatch
     private const int BurstSize = 3;
     private const float ReleaseTime = 0.15f;
     private const float AutoReloadDelay = 0.2f;
+    private const float AutoReloadNextDelay = 0.05f;
 
     private static readonly Dictionary<string, string> Guns = new()
     {
@@ -283,6 +284,8 @@ internal static class CheckFireInputPatch
     private static readonly List<Light> Lights = new();
     private static float _emptySince = -1f;
     private static float _nextReloadTry;
+    private static bool _autoReloading;
+    private static IntPtr _autoReloadGun = IntPtr.Zero;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -347,7 +350,14 @@ internal static class CheckFireInputPatch
 
     private static void TryAutoReload(RangedWeaponController controller)
     {
-        if (!FullAuto.AutoReload || !InGame || controller._isReloading || controller.IsReloading() || controller.IsReloadQueued())
+        if (!FullAuto.AutoReload || !InGame)
+        {
+            _emptySince = -1f;
+            _autoReloading = false;
+            return;
+        }
+
+        if (controller._isReloading || controller.IsReloading() || controller.IsReloadQueued())
         {
             _emptySince = -1f;
             return;
@@ -358,7 +368,13 @@ internal static class CheckFireInputPatch
             return;
 
         var ammo = weapon.GetAmmo();
-        if (ammo == null || !ammo.IsEmpty())
+        if (ammo == null)
+            return;
+
+        if (_autoReloading && (_autoReloadGun != controller.Pointer || ammo.IsFull() || FirePressed()))
+            _autoReloading = false;
+
+        if (!ammo.IsEmpty() && !_autoReloading)
         {
             _emptySince = -1f;
             return;
@@ -371,18 +387,24 @@ internal static class CheckFireInputPatch
             return;
         }
 
-        if (now - _emptySince < AutoReloadDelay || now < _nextReloadTry)
+        var wait = _autoReloading ? AutoReloadNextDelay : AutoReloadDelay;
+        if (now - _emptySince < wait || now < _nextReloadTry)
             return;
 
-        _nextReloadTry = now + 1f;
+        _nextReloadTry = now + 0.3f;
 
         if (!controller.CanReload())
+        {
+            _autoReloading = false;
             return;
+        }
 
         controller.Reload();
+        _autoReloading = true;
+        _autoReloadGun = controller.Pointer;
 
         if (FullAuto.Verbose)
-            RLog.Msg($"FullAuto auto reload {controller.GetIl2CppType().Name}");
+            RLog.Msg($"FullAuto auto reload {controller.GetIl2CppType().Name}, ammo {ammo.GetRemainingAmmo()}/{ammo.GetCapacity()}");
     }
 
     internal static void CancelBurst()
