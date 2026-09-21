@@ -37,6 +37,7 @@ public class FullAuto : SonsMod
         set => Modes[CurrentGun] = value;
     }
     internal static bool FastReload;
+    internal static bool AutoReload;
     internal static KeyCode FlashlightKey = KeyCode.F;
     internal static bool Verbose;
 
@@ -53,7 +54,7 @@ public class FullAuto : SonsMod
         _configPath = Path.Combine(LoaderEnvironment.UserDataDirectory, "FullAuto.txt");
         Load();
         Save();
-        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Fast reload: {FastReload}. Flashlight key: {FlashlightKey}. Guns only. Middle mouse cycles modes. Console: fullauto");
+        RLog.Msg($"FullAuto loaded. RPM: {Rpm}. Fast reload: {FastReload}. Auto reload: {AutoReload}. Flashlight key: {FlashlightKey}. Guns only. Middle mouse cycles modes. Console: fullauto");
     }
 
     private void OnUpdate()
@@ -122,6 +123,18 @@ public class FullAuto : SonsMod
                 }
                 Usage();
                 return;
+            case "autoreload":
+                if (parts.Length > 1 && (parts[1].ToLowerInvariant() == "on" || parts[1].ToLowerInvariant() == "off"))
+                {
+                    AutoReload = parts[1].ToLowerInvariant() == "on";
+                    Save();
+                    var autoText = $"Auto reload {(AutoReload ? "ON" : "OFF")}";
+                    SonsTools.ShowMessage(autoText);
+                    RLog.Msg(autoText);
+                    return;
+                }
+                Usage();
+                return;
             case "rpm":
                 if (parts.Length > 1 && float.TryParse(parts[1], out var value))
                 {
@@ -142,7 +155,7 @@ public class FullAuto : SonsMod
 
     private static void Usage()
     {
-        var text = $"Usage: fullauto [on|off|debug], fullauto rpm <{MinRpm}-{MaxRpm}>, fullauto fastreload on|off";
+        var text = $"Usage: fullauto [on|off|debug], fullauto rpm <{MinRpm}-{MaxRpm}>, fullauto fastreload on|off, fullauto autoreload on|off";
         SonsTools.ShowMessage(text, 5f);
         RLog.Msg(text);
     }
@@ -164,7 +177,7 @@ public class FullAuto : SonsMod
 
     internal static void Announce()
     {
-        var reload = FastReload ? ", fast reload on" : "";
+        var reload = (FastReload ? ", fast reload on" : "") + (AutoReload ? ", auto reload on" : "");
         var text = Enabled ? $"{ModeName()} ({Rpm} RPM{reload})" : $"FullAuto OFF{reload}";
         SonsTools.ShowMessage(text);
         RLog.Msg(text);
@@ -190,6 +203,8 @@ public class FullAuto : SonsMod
                     Rpm = Mathf.Clamp(rpm, MinRpm, MaxRpm);
                 else if (key == "fastreload" && bool.TryParse(val, out var fast))
                     FastReload = fast;
+                else if (key == "autoreload" && bool.TryParse(val, out var auto))
+                    AutoReload = auto;
                 else if (key == "flashlightkey" && Enum.TryParse<KeyCode>(val, true, out var flashKey))
                     FlashlightKey = flashKey;
                 else if (key.StartsWith("mode.") && Enum.TryParse<FireMode>(val, true, out var gunMode))
@@ -209,6 +224,7 @@ public class FullAuto : SonsMod
             var sb = new System.Text.StringBuilder();
             sb.Append($"rpm={Rpm}\n");
             sb.Append($"fastreload={FastReload.ToString().ToLowerInvariant()}\n");
+            sb.Append($"autoreload={AutoReload.ToString().ToLowerInvariant()}\n");
             sb.Append($"flashlightkey={FlashlightKey}\n");
             foreach (var gun in CheckFireInputPatch.GunKeys)
             {
@@ -230,6 +246,7 @@ internal static class CheckFireInputPatch
     private const int MaxShotsPerFrame = 4;
     private const int BurstSize = 3;
     private const float ReleaseTime = 0.15f;
+    private const float AutoReloadDelay = 0.2f;
 
     private static readonly Dictionary<string, string> Guns = new()
     {
@@ -264,6 +281,8 @@ internal static class CheckFireInputPatch
     private static bool _flashlightOff;
     private static IntPtr _lightsOwner = IntPtr.Zero;
     private static readonly List<Light> Lights = new();
+    private static float _emptySince = -1f;
+    private static float _nextReloadTry;
     private static bool _loggedHook;
 
     internal static bool HoldingGun => _lastGunTime >= 0f && Time.time - _lastGunTime < 0.25f;
@@ -324,6 +343,46 @@ internal static class CheckFireInputPatch
             if (light && light.enabled == _flashlightOff)
                 light.enabled = !_flashlightOff;
         }
+    }
+
+    private static void TryAutoReload(RangedWeaponController controller)
+    {
+        if (!FullAuto.AutoReload || !InGame || controller._isReloading || controller.IsReloading() || controller.IsReloadQueued())
+        {
+            _emptySince = -1f;
+            return;
+        }
+
+        var weapon = controller.GetRangedWeapon();
+        if (!weapon)
+            return;
+
+        var ammo = weapon.GetAmmo();
+        if (ammo == null || !ammo.IsEmpty())
+        {
+            _emptySince = -1f;
+            return;
+        }
+
+        var now = Time.time;
+        if (_emptySince < 0f)
+        {
+            _emptySince = now;
+            return;
+        }
+
+        if (now - _emptySince < AutoReloadDelay || now < _nextReloadTry)
+            return;
+
+        _nextReloadTry = now + 1f;
+
+        if (!controller.CanReload())
+            return;
+
+        controller.Reload();
+
+        if (FullAuto.Verbose)
+            RLog.Msg($"FullAuto auto reload {controller.GetIl2CppType().Name}");
     }
 
     internal static void CancelBurst()
@@ -533,6 +592,9 @@ internal static class CheckFireInputPatch
         }
 
         UpdateReloadSpeed(__instance, allowed);
+
+        if (allowed)
+            TryAutoReload(__instance);
 
         if (allowed && GunNames.TryGetValue(ptr, out var gunName))
         {
